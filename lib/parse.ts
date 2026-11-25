@@ -187,3 +187,50 @@ export function parseBankFile(buf: ArrayBuffer): ParsedRow[] {
   if (/<OFX|OFXHEADER|<STMTTRN>/i.test(text)) return parseOFX(text);
   return parseCSV(text);
 }
+
+// ---------------------------------------------------------------------------
+// Import PDF (page « Opérations » du site CIC imprimée / enregistrée en PDF)
+// ---------------------------------------------------------------------------
+
+const PDF_ROW =
+  /^(\d{2}\/\d{2}\/\d{4})\s*(.*?)\s*(?:d.tail\s*)?([+-])\s*((?:\d{1,3}(?:[\s ]\d{3})+|\d+),\d{2})\s*EUR\s*$/i;
+
+/**
+ * Lit les lignes de texte d'un PDF CIC. Seules les opérations « enregistrées » sont importées :
+ * celles « en cours d'enregistrement » sont ignorées (leur libellé change ensuite, elles feraient des doublons)
+ * et reviendront dans le prochain export.
+ */
+export function parsePdfLines(lines: string[]): { rows: ParsedRow[]; pending: number } {
+  const rows: ParsedRow[] = [];
+  let pending = 0;
+  let section: 'all' | 'pending' | 'booked' = 'all';
+  for (const raw of lines) {
+    const line = raw.replace(/\s+/g, ' ').trim();
+    const n = norm(line);
+    if (n.startsWith('operations en cours')) {
+      section = 'pending';
+      continue;
+    }
+    if (n.startsWith('operations enregistrees')) {
+      section = 'booked';
+      continue;
+    }
+    const m = line.match(PDF_ROW);
+    if (!m) continue;
+    const date = parseDate(m[1]);
+    const amount = parseNum(m[4]);
+    if (!date || amount === null || amount === 0) continue;
+    if (section === 'pending') {
+      pending++;
+      continue;
+    }
+    const label = m[2].replace(/\s+/g, ' ').trim();
+    rows.push({ date, label: label || 'Opération', amount: m[3] === '-' ? -amount : amount });
+  }
+  return { rows, pending };
+}
+
+export function isPdf(buf: ArrayBuffer): boolean {
+  const head = new Uint8Array(buf.slice(0, 5));
+  return String.fromCharCode(...head) === '%PDF-';
+}

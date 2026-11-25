@@ -1,7 +1,7 @@
 # Budget app
 
 Appli de budget ultra simple : saisie en un champ (`12,50 leclerc`), catégories devinées automatiquement,
-import du relevé CIC (CSV / OFX), bilan avec le solde réel de la banque.
+import du relevé CIC (PDF de la page Opérations, CSV ou OFX), bilan avec le solde réel de la banque.
 
 Stack : Next.js + Supabase + Vercel. Tables Supabase préfixées `budget_`.
 

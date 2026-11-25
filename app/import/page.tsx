@@ -7,7 +7,8 @@ import { useBudget } from '@/lib/data';
 import { fetchAll } from '@/lib/actions';
 import { keywordOf, norm, suggestCategory } from '@/lib/categorize';
 import { addDays, daysBetween } from '@/lib/dates';
-import { parseBankFile } from '@/lib/parse';
+import { isPdf, parseBankFile, parsePdfLines, type ParsedRow } from '@/lib/parse';
+import { extractPdfLines } from '@/lib/pdf';
 import { eurSigned } from '@/lib/format';
 import type { Tx } from '@/lib/types';
 
@@ -56,6 +57,7 @@ export default function ImportPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
   const [skipped, setSkipped] = useState(0);
+  const [pending, setPending] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState({ added: 0, matched: 0, unclassified: 0 });
@@ -64,10 +66,18 @@ export default function ImportPage() {
     setError(null);
     setBusy(true);
     try {
-      const parsed = parseBankFile(await file.arrayBuffer());
+      const buf = await file.arrayBuffer();
+      let parsed: ParsedRow[];
+      let pend = 0;
+      if (isPdf(buf)) {
+        const r = parsePdfLines(await extractPdfLines(buf));
+        parsed = r.rows;
+        pend = r.pending;
+      } else parsed = parseBankFile(buf);
+      setPending(pend);
       if (!parsed.length) {
         throw new Error(
-          "Je n'ai trouvé aucune opération dans ce fichier. Sur le site du CIC : Comptes > Télécharger > format CSV (ou OFX), puis dépose le fichier ici.",
+          "Je n'ai trouvé aucune opération dans ce fichier. Vérifie que c'est bien la page « Opérations » du CIC (PDF), ou un export CSV / OFX.",
         );
       }
       // empreinte unique par ligne (le n° d'occurrence gère les vraies opérations identiques le même jour)
@@ -188,15 +198,14 @@ export default function ImportPage() {
       {step === 'pick' && (
         <div className="card">
           <p style={{ marginTop: 0 }}>
-            Sur le site ou l&apos;appli du <b>CIC</b> : <b>Comptes → Télécharger</b> (ou « Exporter »), choisis le format
-            <b> CSV</b> (ou OFX) et la période, puis dépose le fichier ici.
+            Sur le site du <b>CIC</b>, dans la page <b>Opérations</b> de ton compte : enregistre la page en <b>PDF</b> (ou « Télécharger » en CSV / OFX si tu vois l&apos;option), puis dépose le fichier ici.
           </p>
           <p className="small muted">
             Les opérations déjà importées sont ignorées, et celles que tu as saisies toi-même sont automatiquement rapprochées (pointées), sans doublon.
           </p>
           <input
             type="file"
-            accept=".csv,.ofx,.qfx,.txt,text/csv"
+            accept=".pdf,.csv,.ofx,.qfx,.txt,application/pdf,text/csv"
             disabled={busy}
             onChange={(e) => {
               const f = e.target.files?.[0];
@@ -214,6 +223,11 @@ export default function ImportPage() {
             <b>{rows.length}</b> nouvelle{rows.length > 1 ? 's' : ''} opération{rows.length > 1 ? 's' : ''}
             {matches.length > 0 && <> · <b>{matches.length}</b> rapprochée{matches.length > 1 ? 's' : ''} de tes saisies</>}
             {skipped > 0 && <> · {skipped} déjà importée{skipped > 1 ? 's' : ''}</>}
+            {pending > 0 && (
+              <p className="small muted" style={{ marginBottom: 0 }}>
+                {pending} opération{pending > 1 ? 's' : ''} « en cours d&apos;enregistrement » ignorée{pending > 1 ? 's' : ''} : elle{pending > 1 ? 's' : ''} arrivera{pending > 1 ? 'ont' : ''} au prochain import, une fois enregistrée{pending > 1 ? 's' : ''} par la banque.
+              </p>
+            )}
             {rows.some((r) => !r.catId) && (
               <p className="small muted" style={{ marginBottom: 0 }}>
                 Les lignes sans catégorie sont en haut : choisis-en une (elle sera mémorisée pour la prochaine fois) ou laisse vide, tu pourras classer plus tard.
