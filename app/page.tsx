@@ -2,8 +2,9 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { supabase } from '@/lib/supabase';
 import { useBudget } from '@/lib/data';
-import { getPeriod, todayISO } from '@/lib/dates';
+import { addDays, getPeriod, todayISO } from '@/lib/dates';
 import { fetchTxBetween, proposeBudgets } from '@/lib/actions';
 import { computeMonth, envelopeTone } from '@/lib/stats';
 import { eur } from '@/lib/format';
@@ -11,20 +12,39 @@ import type { Tx } from '@/lib/types';
 import QuickAdd from '@/components/QuickAdd';
 import { MonthNav } from '@/components/ui';
 
+interface Balance {
+  estimated: number;
+  since: string;
+}
+
 export default function HomePage() {
   const { categories, settings, reload } = useBudget();
   const [offset, setOffset] = useState(0);
   const [txs, setTxs] = useState<Tx[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [info, setInfo] = useState<string | null>(null);
+  const [balance, setBalance] = useState<Balance | null | undefined>(undefined); // undefined = chargement, null = pas de bilan
 
   const period = useMemo(() => getPeriod(offset, settings.month_start_day), [offset, settings.month_start_day]);
   const today = todayISO();
 
+  // Solde estimé = solde du dernier bilan + opérations depuis ce bilan
+  const loadBalance = useCallback(async () => {
+    const { data } = await supabase.from('budget_checkups').select('date,bank_balance').order('date', { ascending: false }).order('created_at', { ascending: false }).limit(1);
+    const last = data?.[0];
+    if (!last) {
+      setBalance(null);
+      return;
+    }
+    const since = await fetchTxBetween(addDays(last.date, 1), todayISO());
+    setBalance({ estimated: Number(last.bank_balance) + since.reduce((s, t) => s + t.amount, 0), since: last.date });
+  }, []);
+
   const refresh = useCallback(async () => {
     setTxs(await fetchTxBetween(period.start, period.end));
     setLoaded(true);
-  }, [period.start, period.end]);
+    loadBalance();
+  }, [period.start, period.end, loadBalance]);
 
   useEffect(() => {
     refresh();
@@ -33,6 +53,7 @@ export default function HomePage() {
   const s = useMemo(() => computeMonth(txs, categories, settings, period, today), [txs, categories, settings, period, today]);
   const noBudgets = s.totalBudgets === 0;
   const isCurrent = offset === 0;
+  const planned = s.totalBudgets > 0 || s.savingsPlanned > 0;
 
   async function propose() {
     const n = await proposeBudgets(categories, settings);
@@ -73,6 +94,34 @@ export default function HomePage() {
             <div className="sub">{message}</div>
           </div>
 
+          {isCurrent && balance !== undefined && (
+            <Link href="/bilan" className="card row between" style={{ color: 'inherit' }}>
+              {balance === null ? (
+                <span className="small">⚖️ Fais ton premier bilan pour suivre le solde de ton compte</span>
+              ) : (
+                <>
+                  <span>
+                    <span className="small muted">Solde estimé du compte</span>
+                    <br />
+                    <b style={{ fontSize: '1.2rem' }}>{eur(balance.estimated)}</b>
+                  </span>
+                  <span className="small muted right">d&apos;après ton bilan<br />du {balance.since.split('-').reverse().join('/')}</span>
+                </>
+              )}
+            </Link>
+          )}
+
+          {planned && (
+            <div className={`alert ${Math.abs(s.toAllocate) < 1 ? 'good' : s.toAllocate < 0 ? 'bad' : ''}`}>
+              {Math.abs(s.toAllocate) < 1
+                ? '✅ Tout ton argent est réparti entre tes enveloppes.'
+                : s.toAllocate > 0
+                  ? `💡 Il reste ${eur(s.toAllocate, 0)} à répartir : ils ne sont dans aucune enveloppe (ni épargne).`
+                  : `⚠️ Tes enveloppes dépassent ce que tu touches de ${eur(-s.toAllocate, 0)}.`}{' '}
+              <Link href="/reglages" style={{ textDecoration: 'underline', color: 'inherit' }}>Ajuster</Link>
+            </div>
+          )}
+
           <div className="grid2">
             <div className="stat">
               <div className="k">Revenus {s.incomeReceived < settings.expected_income ? '(attendus)' : 'reçus'}</div>
@@ -83,18 +132,18 @@ export default function HomePage() {
               <div className="v">{eur(s.fixedTotal, 0)}</div>
             </div>
             <div className="stat">
-              <div className="k">Déjà dépensé</div>
-              <div className="v">{eur(s.variableSpent, 0)}</div>
+              <div className="k">Épargne {s.savedTotal > s.savingsPlanned ? 'mise de côté' : 'prévue'}</div>
+              <div className="v">{eur(s.savingsReserve, 0)}</div>
             </div>
             <div className="stat">
-              <div className="k">Budgets prévus</div>
-              <div className="v">{s.totalBudgets ? eur(s.totalBudgets, 0) : '—'}</div>
+              <div className="k">Déjà dépensé</div>
+              <div className="v">{eur(s.variableSpent, 0)}{s.totalBudgets ? <span className="small muted"> / {eur(s.totalBudgets, 0)}</span> : null}</div>
             </div>
           </div>
 
           {settings.expected_income === 0 && s.incomeReceived === 0 && (
             <Link href="/reglages" className="alert">
-              💡 Indique ton revenu de base (ton salaire fixe) dans Réglages pour que le « reste à vivre » ait du sens.
+              💡 Indique ce que tu touches (revenu de base) dans Réglages pour que le « reste à vivre » ait du sens.
             </Link>
           )}
 

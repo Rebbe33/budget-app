@@ -19,6 +19,10 @@ Stack : Next.js + Supabase + Vercel. Tables Supabase préfixées `budget_`.
 
 En local : copie `.env.example` en `.env.local`, renseigne les 2 valeurs, puis `npm install && npm run dev`.
 
+## Mise à jour (si tu avais déjà exécuté le SQL)
+
+Relance `supabase/schema.sql` en entier dans le SQL Editor : il est sans risque et ajoute le type de catégorie « Épargne / transfert ».
+
 ## Utilisation
 
 - **Accueil** : saisis une dépense (`12,50 leclerc`) ou un revenu (`+80 petit boulot`). Le « reste à vivre » et les jauges se mettent à jour.

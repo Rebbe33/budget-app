@@ -17,10 +17,14 @@ export interface MonthStats {
   incomeBase: number;
   fixedTotal: number;
   fixedDone: number;
+  savedTotal: number; // épargne déjà mise de côté ce mois-ci (négatif = retrait d'épargne)
+  savingsPlanned: number; // objectif d'épargne mensuel (somme des budgets des catégories épargne)
+  savingsReserve: number; // ce qui est retiré du disponible : le plus grand de « prévu » et « déjà fait »
   variableSpent: number;
   totalBudgets: number;
-  available: number; // revenus - charges fixes
+  available: number; // revenus - charges fixes - épargne
   reste: number; // reste à vivre
+  toAllocate: number; // revenus - charges fixes - épargne prévue - budgets des enveloppes
   daysLeft: number;
   perDay: number;
   status: Status;
@@ -41,6 +45,7 @@ export function computeMonth(
   let incomeReceived = 0;
   let fixedTotal = 0;
   let fixedDone = 0;
+  let savedTotal = 0;
 
   for (const tx of txs) {
     const past = tx.date <= today;
@@ -55,6 +60,8 @@ export function computeMonth(
     }
     if (cat.kind === 'revenu') {
       if (past) incomeReceived += tx.amount;
+    } else if (cat.kind === 'epargne') {
+      if (past) savedTotal += -tx.amount;
     } else if (cat.kind === 'fixe') {
       fixedTotal += -tx.amount;
       if (past) fixedDone += -tx.amount;
@@ -69,9 +76,12 @@ export function computeMonth(
 
   const variableSpent = envelopes.reduce((s, e) => s + e.spent, 0) + unclassifiedSpent;
   const totalBudgets = envelopes.reduce((s, e) => s + (e.budget ?? 0), 0);
+  const savingsPlanned = cats.filter((c) => c.kind === 'epargne').reduce((s, c) => s + (c.monthly_budget ?? 0), 0);
+  const savingsReserve = Math.max(savingsPlanned, savedTotal);
   const incomeBase = Math.max(settings.expected_income, incomeReceived);
-  const available = incomeBase - fixedTotal;
+  const available = incomeBase - fixedTotal - savingsReserve;
   const reste = available - variableSpent;
+  const toAllocate = incomeBase - fixedTotal - savingsPlanned - totalBudgets;
 
   const inPeriod = today >= period.start && today <= period.end;
   const daysLeft = today > period.end ? 0 : inPeriod ? daysBetween(today, period.end) + 1 : period.days;
@@ -93,10 +103,14 @@ export function computeMonth(
     incomeBase,
     fixedTotal,
     fixedDone,
+    savedTotal,
+    savingsPlanned,
+    savingsReserve,
     variableSpent,
     totalBudgets,
     available,
     reste,
+    toAllocate,
     daysLeft,
     perDay,
     status,

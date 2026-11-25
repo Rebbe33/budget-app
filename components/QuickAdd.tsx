@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useBudget } from '@/lib/data';
 import { parseQuick } from '@/lib/parse';
-import { suggestCategory } from '@/lib/categorize';
+import { kindAllowed, suggestCategory } from '@/lib/categorize';
 import { addDays, todayISO } from '@/lib/dates';
 import { eur } from '@/lib/format';
 import { CatChips } from './ui';
@@ -34,7 +34,7 @@ export default function QuickAdd({ onAdded }: { onAdded: () => void }) {
     if (!text.trim()) setExplicit(null);
   }, [text]);
 
-  const choices = categories.filter((c) => (parsed.income ? c.kind === 'revenu' : c.kind !== 'revenu'));
+  const choices = categories.filter((c) => kindAllowed(c.kind, parsed.income));
   const dateISO = mode === 'today' ? todayISO() : mode === 'yesterday' ? addDays(todayISO(), -1) : custom;
 
   async function save() {

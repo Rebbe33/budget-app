@@ -27,6 +27,11 @@ export function keywordOf(label: string): string | null {
   return cleanWords(label)[0] ?? null;
 }
 
+/** Une dépense va dans variable / fixe / épargne ; un revenu va dans revenu / épargne (retrait d'épargne). */
+export function kindAllowed(kind: Category['kind'], income: boolean): boolean {
+  return income ? kind === 'revenu' || kind === 'epargne' : kind !== 'revenu';
+}
+
 /** Dictionnaire de départ, par NOM de catégorie (celles créées par défaut). */
 const DEFAULT_KEYWORDS: Record<string, string[]> = {
   Courses: [
@@ -62,6 +67,7 @@ const DEFAULT_KEYWORDS: Record<string, string[]> = {
     'groupama', 'matmut', 'free mobile', 'free ', 'orange', 'sfr', 'bouygues', 'internet', 'mutuelle',
     'dgfip', 'impots', 'taxe', 'syndic', 'foncia', 'sosh', 'red by', 'ovh',
   ],
+  Épargne: ['livret', 'epargne', 'virement permanent', 'pel ', 'assurance vie'],
   Salaire: ['salaire', 'paie ', 'remuneration'],
 };
 
@@ -90,7 +96,7 @@ export function suggestCategory(
   for (const cat of cats) {
     const kws = DEFAULT_KEYWORDS[cat.name];
     if (!kws) continue;
-    if (isIncome !== (cat.kind === 'revenu')) continue;
+    if (cat.kind !== 'epargne' && isIncome !== (cat.kind === 'revenu')) continue;
     for (const kw of kws) {
       if (n.includes(kw) && (!best || kw.length > best.len)) best = { len: kw.length, id: cat.id };
     }

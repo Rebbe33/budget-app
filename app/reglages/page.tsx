@@ -3,14 +3,15 @@
 import { useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useBudget } from '@/lib/data';
-import { downloadCSV, fetchAll, normTx, proposeBudgets } from '@/lib/actions';
+import { downloadCSV, fetchAll, fetchTxBetween, normTx, proposeBudgets } from '@/lib/actions';
 import { getPeriod, recurringDate } from '@/lib/dates';
 import { eur, round2 } from '@/lib/format';
 import { parseNum } from '@/lib/parse';
+import { kindAllowed } from '@/lib/categorize';
 import type { Category, Kind, Recurring, Tx } from '@/lib/types';
 import { Sheet } from '@/components/ui';
 
-const KIND_LABEL: Record<Kind, string> = { variable: 'Dépense variable', fixe: 'Charge fixe', revenu: 'Revenu' };
+const KIND_LABEL: Record<Kind, string> = { variable: 'Dépense variable', fixe: 'Charge fixe', revenu: 'Revenu', epargne: 'Épargne / transfert' };
 
 function CatRow({ cat, onChanged }: { cat: Category; onChanged: () => void }) {
   const [emoji, setEmoji] = useState(cat.emoji);
@@ -22,7 +23,7 @@ function CatRow({ cat, onChanged }: { cat: Category; onChanged: () => void }) {
     if (name.trim() === '') return;
     await supabase
       .from('budget_categories')
-      .update({ emoji: emoji || '📦', name: name.trim(), monthly_budget: cat.kind === 'variable' ? b : null })
+      .update({ emoji: emoji || '📦', name: name.trim(), monthly_budget: cat.kind === 'variable' || cat.kind === 'epargne' ? b : null })
       .eq('id', cat.id);
     onChanged();
   }
@@ -36,8 +37,8 @@ function CatRow({ cat, onChanged }: { cat: Category; onChanged: () => void }) {
     <div className="catrow">
       <input value={emoji} onChange={(e) => setEmoji(e.target.value)} onBlur={save} style={{ textAlign: 'center' }} maxLength={4} />
       <input value={name} onChange={(e) => setName(e.target.value)} onBlur={save} />
-      {cat.kind === 'variable' ? (
-        <input inputMode="decimal" placeholder="Budget €" value={budget} onChange={(e) => setBudget(e.target.value)} onBlur={save} />
+      {cat.kind === 'variable' || cat.kind === 'epargne' ? (
+        <input inputMode="decimal" placeholder={cat.kind === 'epargne' ? 'Objectif €' : 'Budget €'} value={budget} onChange={(e) => setBudget(e.target.value)} onBlur={save} />
       ) : (
         <span className="small muted">{KIND_LABEL[cat.kind]}</span>
       )}
@@ -56,7 +57,7 @@ function RecurringForm({ rec, onClose, onSaved }: { rec: Recurring | null; onClo
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const choices = categories.filter((c) => (income ? c.kind === 'revenu' : c.kind !== 'revenu'));
+  const choices = categories.filter((c) => kindAllowed(c.kind, income));
 
   async function save() {
     const n = parseNum(amount);
@@ -149,6 +150,33 @@ export default function ReglagesPage() {
     await reload();
   }
 
+  async function takeLastMonth() {
+    const p = getPeriod(-1, settings.month_start_day);
+    const list = await fetchTxBetween(p.start, p.end);
+    const total = list
+      .filter((t) => t.amount > 0 && catById(t.category_id)?.kind !== 'epargne')
+      .reduce((s, t) => s + t.amount, 0);
+    const prudent = Math.floor(total / 10) * 10;
+    if (prudent <= 0) {
+      setInfo("Je n'ai trouvé aucun revenu le mois dernier : saisis le montant à la main.");
+      return;
+    }
+    const txt = String(prudent);
+    setIncome(txt);
+    await saveSettings(startDay, txt);
+    setInfo(`Revenu de base réglé sur ${eur(prudent, 0)} (ce que tu as reçu le mois dernier, arrondi à la dizaine inférieure).`);
+  }
+
+  // Répartition prévue du mois : ce que je touche - charges fixes - épargne - budgets
+  const recIncome = recurrings.filter((r) => r.active && r.amount > 0).reduce((s, r) => s + r.amount, 0);
+  const recFixed = recurrings
+    .filter((r) => r.active && r.amount < 0 && catById(r.category_id)?.kind !== 'epargne')
+    .reduce((s, r) => s - r.amount, 0);
+  const planIncome = Math.max(Number(parseNum(income) ?? 0), recIncome);
+  const planSavings = categories.filter((c) => c.kind === 'epargne').reduce((s, c) => s + (c.monthly_budget ?? 0), 0);
+  const planBudgets = categories.filter((c) => c.kind === 'variable').reduce((s, c) => s + (c.monthly_budget ?? 0), 0);
+  const planLeft = planIncome - recFixed - planSavings - planBudgets;
+
   async function addCategory() {
     const name = newName.trim();
     if (!name) return;
@@ -181,6 +209,7 @@ export default function ReglagesPage() {
   const groups: { kind: Kind; title: string }[] = [
     { kind: 'variable', title: 'Enveloppes (dépenses variables) — avec leur budget mensuel' },
     { kind: 'fixe', title: 'Charges fixes' },
+    { kind: 'epargne', title: "Épargne & transferts (Livret A…) — avec ton objectif d'épargne mensuel" },
     { kind: 'revenu', title: 'Revenus' },
   ];
 
@@ -192,18 +221,21 @@ export default function ReglagesPage() {
       <div className="card">
         <b>Mon mois</b>
         <div className="spacer" />
-        <label className="field">Revenu de base attendu chaque mois (€)
+        <label className="field">Ce que je touche au minimum chaque mois (€)
           <input
             inputMode="decimal"
-            placeholder="ex : 1 400 (ton salaire fixe)"
+            placeholder="ex : 1 150 (chômage, ou saison)"
             value={income}
             onChange={(e) => setIncome(e.target.value)}
             onBlur={() => saveSettings()}
           />
         </label>
         <p className="small muted" style={{ marginTop: -4 }}>
-          Les petits boulots s&apos;ajoutent au fur et à mesure : si tu reçois plus que ce montant, c&apos;est le réel qui compte.
+          Mets le montant dont tu es sûre : si tu reçois plus, c&apos;est le réel qui compte (le reste à vivre augmente tout seul).
+          Astuce : ajoute ton chômage en revenu récurrent le 1er du mois, il se mettra tout seul.
         </p>
+        <button className="btn ghost small" onClick={takeLastMonth}>Prendre ce que j&apos;ai reçu le mois dernier</button>
+        <div className="spacer" />
         <label className="field">Mon mois commence le…
           <select
             value={startDay}
@@ -217,6 +249,27 @@ export default function ReglagesPage() {
             ))}
           </select>
         </label>
+      </div>
+
+      <div className="card">
+        <b>Répartition de mon mois</b>
+        <div className="small" style={{ marginTop: 8 }}>
+          <div className="row between"><span>Ce que je touche</span><b>{eur(planIncome, 0)}</b></div>
+          <div className="row between"><span className="muted">− Charges fixes récurrentes</span><span>{eur(recFixed, 0)}</span></div>
+          <div className="row between"><span className="muted">− Épargne prévue</span><span>{eur(planSavings, 0)}</span></div>
+          <div className="row between"><span className="muted">− Budgets des enveloppes</span><span>{eur(planBudgets, 0)}</span></div>
+          <div className="row between" style={{ borderTop: '1px solid var(--line)', marginTop: 6, paddingTop: 6 }}>
+            <b>À répartir</b>
+            <b style={{ color: Math.abs(planLeft) < 1 ? 'var(--ok)' : planLeft < 0 ? 'var(--over)' : 'var(--warn)' }}>{eur(planLeft, 0)}</b>
+          </div>
+        </div>
+        <p className="small muted" style={{ marginBottom: 0 }}>
+          {Math.abs(planLeft) < 1
+            ? '✅ Tout est réparti.'
+            : planLeft > 0
+              ? 'Cet argent n’est dans aucune enveloppe : augmente un budget ou ton épargne.'
+              : 'Tes enveloppes dépassent ce que tu touches : baisse un budget.'}
+        </p>
       </div>
 
       <div className="card">
@@ -258,6 +311,7 @@ export default function ReglagesPage() {
             <option value="variable">Variable</option>
             <option value="fixe">Fixe</option>
             <option value="revenu">Revenu</option>
+            <option value="epargne">Épargne</option>
           </select>
           <button className="btn small" onClick={addCategory}>OK</button>
         </div>

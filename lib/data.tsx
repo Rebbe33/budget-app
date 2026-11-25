@@ -36,6 +36,7 @@ const SEED: { name: string; emoji: string; kind: Category['kind'] }[] = [
   { name: 'Santé', emoji: '💊', kind: 'variable' },
   { name: 'Loisirs', emoji: '🎨', kind: 'variable' },
   { name: 'Divers', emoji: '📦', kind: 'variable' },
+  { name: 'Épargne', emoji: '🐷', kind: 'epargne' },
   { name: 'Logement & charges', emoji: '🏠', kind: 'fixe' },
   { name: 'Salaire', emoji: '💼', kind: 'revenu' },
   { name: 'Petits boulots', emoji: '💶', kind: 'revenu' },
@@ -84,6 +85,17 @@ export function BudgetProvider({ userId, children }: { userId: string; children:
           .upsert({ user_id: userId, ...DEFAULT_SETTINGS }, { onConflict: 'user_id', ignoreDuplicates: true });
       }
       if (!d.cats.length || !d.settings) d = await fetchAll();
+
+      // Catégorie « Épargne » (virements vers le Livret A…) : créée, ou convertie si tu l'avais déjà créée à la main
+      if (d.cats.length && !d.cats.some((c) => c.kind === 'epargne')) {
+        const named = d.cats.find((c) => norm(c.name) === 'epargne');
+        if (named) await supabase.from('budget_categories').update({ kind: 'epargne' }).eq('id', named.id);
+        else
+          await supabase
+            .from('budget_categories')
+            .upsert({ user_id: userId, name: 'Épargne', emoji: '🐷', kind: 'epargne', sort: d.cats.length }, { onConflict: 'user_id,name', ignoreDuplicates: true });
+        d = await fetchAll();
+      }
 
       const st: Settings = d.settings
         ? { month_start_day: d.settings.month_start_day, expected_income: Number(d.settings.expected_income) }

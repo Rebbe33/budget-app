@@ -1,4 +1,4 @@
-export type Kind = 'variable' | 'fixe' | 'revenu';
+export type Kind = 'variable' | 'fixe' | 'revenu' | 'epargne';
 
 export interface Category {
   id: string;

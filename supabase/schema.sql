@@ -10,12 +10,17 @@ create table if not exists budget_categories (
   user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
   name text not null,
   emoji text not null default '📦',
-  kind text not null default 'variable' check (kind in ('variable','fixe','revenu')),
+  kind text not null default 'variable',
   monthly_budget numeric(10,2),
   sort int not null default 0,
   created_at timestamptz not null default now(),
   unique (user_id, name)
 );
+
+-- Types de catégories : variable (enveloppe), fixe, revenu, epargne (épargne / transferts entre comptes)
+alter table budget_categories drop constraint if exists budget_categories_kind_check;
+alter table budget_categories add constraint budget_categories_kind_check
+  check (kind in ('variable','fixe','revenu','epargne'));
 
 -- Règles apprises : un mot-clé du libellé -> une catégorie
 create table if not exists budget_rules (

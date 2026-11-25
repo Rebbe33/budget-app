@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useBudget } from '@/lib/data';
 import { parseNum } from '@/lib/parse';
+import { kindAllowed } from '@/lib/categorize';
 import { round2 } from '@/lib/format';
 import type { Tx } from '@/lib/types';
 import { CatChips, Sheet } from './ui';
@@ -19,7 +20,7 @@ export default function TxEditor({ tx, onClose, onSaved }: { tx: Tx; onClose: ()
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const choices = categories.filter((c) => (income ? c.kind === 'revenu' : c.kind !== 'revenu'));
+  const choices = categories.filter((c) => kindAllowed(c.kind, income));
 
   async function save() {
     const n = parseNum(amount);

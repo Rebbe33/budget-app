@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useBudget } from '@/lib/data';
 import { fetchAll } from '@/lib/actions';
-import { keywordOf, norm, suggestCategory } from '@/lib/categorize';
+import { keywordOf, kindAllowed, norm, suggestCategory } from '@/lib/categorize';
 import { addDays, daysBetween } from '@/lib/dates';
 import { isPdf, parseBankFile, parsePdfLines, type ParsedRow } from '@/lib/parse';
 import { extractPdfLines } from '@/lib/pdf';
@@ -249,7 +249,7 @@ export default function ImportPage() {
                         <select value={r.catId ?? ''} onChange={(e) => setCat(r.hash, e.target.value || null)}>
                           <option value="">🏷️ À classer</option>
                           {categories
-                            .filter((c) => (r.amount > 0 ? c.kind === 'revenu' : c.kind !== 'revenu') || c.id === r.catId)
+                            .filter((c) => kindAllowed(c.kind, r.amount > 0) || c.id === r.catId)
                             .map((c) => (
                               <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>
                             ))}
